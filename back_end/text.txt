@@ -1,0 +1,177 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
+const path = require('path');
+const models = require('./models'); // Import models from models.js
+
+const app = express();
+
+// Middleware
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Serve static files from the frontend directory
+app.use(express.static(path.join(__dirname, '../frontend')));
+
+// MongoDB connection
+mongoose.connect('mongodb://localhost:27017/Web_3rd_IA')
+    .then(() => {
+        console.log('Connected to MongoDB');
+    })
+    .catch(err => {
+        console.error('MongoDB connection error:', err);
+    });
+
+// Route for the index page
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+});
+
+// Route for index2.html
+app.get('/index2', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/index2.html'));
+});
+
+// Route for admin_page.html
+app.get('/admin_page', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/admin_page.html'));
+});
+
+// Route to fetch sales data based on the selected pharmacy
+app.post('/fetch_sales_data', async (req, res) => {
+    const pharmacy_name = req.body.pharmacy_name;
+
+    if (!pharmacy_name) {
+        return res.status(400).json({ error: 'Pharmacy name is required.' });
+    }
+
+    try {
+        // Find the pharmacy by name
+        const pharmacy = await models.PharmacyStore.findOne({ pharmacy_name });
+        if (!pharmacy) {
+            return res.status(404).json({ error: 'Pharmacy not found.' });
+        }
+
+        // Fetch sales data for the given pharmacy_id
+        const salesData = await models.Sales.find({ pharmacy_id: pharmacy._id })
+            .populate('medicine_id', 'medicine_name')
+            .select('quantity total_amount')
+            .lean();
+
+        res.json({ sales: salesData });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Route to fetch inventory data based on pharmacy name
+app.post('/fetch_inventory_data', async (req, res) => {
+    const pharmacy_name = req.body.pharmacy_name;
+
+    if (!pharmacy_name) {
+        return res.status(400).json({ error: 'Pharmacy name is required.' });
+    }
+
+    try {
+        // Find the pharmacy by name
+        const pharmacy = await models.PharmacyStore.findOne({ pharmacy_name });
+        if (!pharmacy) {
+            return res.status(404).json({ error: 'Pharmacy not found.' });
+        }
+
+        // Fetch inventory data for the given pharmacy_id
+        const inventoryData = await models.InventoryManagement.find({ pharmacy_id: pharmacy._id })
+            .select('medicine_name quantity price_per_unit purchase_date prescription_date')
+            .lean();
+
+        // Calculate total price for each inventory item
+        inventoryData.forEach(item => {
+            item.total_price = item.quantity * item.price_per_unit;
+        });
+
+        res.json({ inventory: inventoryData });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Route to fetch prescription data based on the prescription ID
+app.post('/fetch_prescription_data', async (req, res) => {
+    const { prescription_id } = req.body;
+
+    if (!prescription_id) {
+        return res.status(400).json({ error: 'Prescription ID is required.' });
+    }
+
+    try {
+        // Find the prescription by ID
+        const prescription = await models.PrescriptionDetails.findOne({ prescription_id });
+
+        if (!prescription) {
+            return res.status(404).json({ error: 'No prescription found with the given ID.' });
+        }
+
+        res.json({ prescription });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Route to add a new entity (user)
+app.post('/add_entity', async (req, res) => {
+    const { user_id, username, phone_number, password, admin } = req.body;
+
+    if (!user_id || !username || !phone_number || !password) {
+        return res.status(400).json({ success: false, message: 'All fields are required.' });
+    }
+
+    try {
+        const newUser = new models.UserAuthentication({ user_id, username, phone_number, password, admin });
+        await newUser.save();
+        res.status(201).json({
+            success: true,
+            message: `${username} has been added as a ${admin ? 'Admin' : 'Manager'} successfully.`
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error adding entity.' });
+    }
+});
+
+const userAuthenticationSchema = new mongoose.Schema({
+    user_id: String,
+    username: String,
+    phone_number: String,
+    password: String,
+    admin: Boolean
+});
+
+// Route to validate user login
+app.post('/validate_login', async (req, res) => {
+    const { username, phone_number, password, admin } = req.body;
+
+    console.log('Login attempt:', { username, phone_number, password, admin });
+
+    if (!username || !phone_number || !password) {
+        return res.status(400).json({ success: false, message: 'All fields are required.' });
+    }
+
+    try {
+        // Find user with matching credentials
+        const user = await models.UserAuthentication.findOne({ username, phone_number, password });
+        console.log(user)
+
+        if (user) {
+            res.status(200).json({ success: true, message: 'Login successful!' });
+        } else {
+            res.status(401).json({ success: false, message: 'Invalid credentials or user type.' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
